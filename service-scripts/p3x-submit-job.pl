@@ -135,8 +135,17 @@ my $task = $db->create_task($token_obj, $app_id, $appserv_info_url,
 print OUT_TASK $json->encode($task);
 close(OUT_TASK);
 
-
-$redis->command("publish", "task_submission", $task->{id}) if $redis;
+#
+# Invalidate user's cache so new job appears immediately in enumerate_tasks,
+# then notify scheduler of new task.
+#
+if ($redis)
+{
+    my $user = $token_obj->user_id;
+    my $cache_key = "$user:app_service_cache";
+    $redis->command("del", $cache_key);
+    $redis->command("publish", "task_submission", $task->{id});
+}
 
 sub run_preflight
 {
