@@ -1073,7 +1073,6 @@ sub queue_check
 	    #
 	    for my $task ($cj->tasks)
 	    {
-		$self->scheduler->invalidate_user_cache($task->owner->id);
 		$task->update({
 		    state_code => $code,
 		    ($vals->{Start} =~ /\d+/ ? (start_time => $vals->{Start}) : ()),
@@ -1088,6 +1087,8 @@ sub queue_check
 					 $task->output_file,
 					 $task->application_id),
 		});
+		print STDERR "INVALIDATE done $vals->{State}" . $task->owner->id . "\n";
+		$self->scheduler->invalidate_user_cache($task->owner->id);
 	    }
 	}
 	else
@@ -1105,13 +1106,14 @@ sub queue_check
 		#
 		for my $task ($cj->tasks)
 		{
-		    $self->scheduler->invalidate_user_cache($task->owner->id);
 		    if ($vals->{Start})
 		    {
 			$task->update({
 			    start_time => $vals->{Start},
 			});
 		    }
+		    print STDERR "INVALIDATE update $vals->{State} start=$vals->{Start}" . $task->owner->id . "\n";
+		    $self->scheduler->invalidate_user_cache($task->owner->id);
 		}
 	    }
 	}
