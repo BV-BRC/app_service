@@ -156,11 +156,14 @@ export P3_CONTAINER="[% container_image %]"
 
 #
 # Check for metagenome & blast databases and bind into the container run
+# We also bind the local databases direcotry /local_databases if it exists.
+# This is for things like the large alphafold database where the
+# application requires it to be local. 
 #
 nfs_bindings=""
 mg_bind=""
 
-NFS_bindings="/vol/bvbrc/production/application-backend /vol/blastdb/bvbrc-service /vol/patric3/tmp /vol/structure"
+NFS_bindings="/vol/bvbrc/production/application-backend /vol/blastdb/bvbrc-service /vol/patric3/tmp /vol/structure /local_databases"
 for dir in $NFS_bindings ; do
     if [[ -d $dir ]] ; then
 	nfs_bindings="$nfs_bindings,$dir"

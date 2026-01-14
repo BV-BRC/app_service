@@ -334,7 +334,12 @@ sub start_app
 	task_id => $task->id,
 	token => $token->token,
 	expiration => DateTime->from_epoch(epoch => $token->expiry, time_zone => $self->time_zone),
-    }); 
+    });
+
+    #
+    # Invalidate user's cache so new job appears immediately in enumerate_tasks
+    #
+    $self->invalidate_user_cache($user->id);
 
     say "Created task " . $task->id;
     if (1)
