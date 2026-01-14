@@ -1073,7 +1073,7 @@ sub queue_check
 	    #
 	    for my $task ($cj->tasks)
 	    {
-		$self->scheduler->invalidate_user_cache($task->owner);
+		$self->scheduler->invalidate_user_cache($task->owner->id);
 		$task->update({
 		    state_code => $code,
 		    ($vals->{Start} =~ /\d+/ ? (start_time => $vals->{Start}) : ()),
@@ -1104,7 +1104,7 @@ sub queue_check
 		{
 		    for my $task ($cj->tasks)
 		    {
-			$self->scheduler->invalidate_user_cache($task->owner);
+			$self->scheduler->invalidate_user_cache($task->owner->id);
 			$task->update({
 			    start_time => $vals->{Start},
 			});
