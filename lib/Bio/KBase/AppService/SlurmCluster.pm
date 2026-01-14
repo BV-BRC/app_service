@@ -1100,11 +1100,14 @@ sub queue_check
 		    job_status => $vals->{State},
 		    ($vals->{NodeList} ne '' ? (nodelist => $vals->{NodeList}) : ()),
 		});
-		if ($vals->{Start})
+		#
+		# Invalidate cache for all tasks when job status changes
+		#
+		for my $task ($cj->tasks)
 		{
-		    for my $task ($cj->tasks)
+		    $self->scheduler->invalidate_user_cache($task->owner->id);
+		    if ($vals->{Start})
 		    {
-			$self->scheduler->invalidate_user_cache($task->owner->id);
 			$task->update({
 			    start_time => $vals->{Start},
 			});
