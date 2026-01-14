@@ -89,7 +89,7 @@ sub new
 				      on_connect => sub {
 					  if (redis_password)
 					  {
-					      $redis->command("auth", redis_password, sub {
+					      $cmd_redis->command("auth", redis_password, sub {
 						  $cv->send();
 					      });
 					  }
@@ -101,8 +101,8 @@ sub new
 	$cv->wait();
 	undef $cv;
 	$cv = AnyEvent->condvar;
-	
-	$redis->command("select", redis_db, sub {
+
+	$cmd_redis->command("select", redis_db, sub {
 	    print  "select finished\n";
 	    $cv->send();
 	},);
