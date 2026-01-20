@@ -265,9 +265,12 @@ sub run_preflight
 	
 	my @singularity_opts;
 	
-	if (-d "/vol/blastdb/bvbrc-service")
+	my @to_bind = qw(/vol/blastdb/bvbrc-service /vol/bvbrc/production/application-backend /vol/patric3/tmp /vol/structure /local_databases);
+
+	my $bind = join(",", grep { -d $_ } @to_bind);
+	if ($bind)
 	{
-	    push(@singularity_opts, "-B", "/vol/blastdb/bvbrc-service");
+	    push(@singularity_opts, "-B", $bind);
 	}
 	
 	print STDERR "Execute preflight in $container_path: @cmd\n";
