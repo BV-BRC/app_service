@@ -743,13 +743,14 @@ EAL
 	}
 
 	$vars{sbatch_reservation} = $policy->{reservation};
-	if (my $c = $policy->{constraint})
+	if ((my $c = $policy->{constraint}) =~ /^[a-zA-Z0-9&|]+$/)
 	{
-	    $constraint{$_} = 1 foreach $c =~ /\w+/g;
-	    if (%constraint)
-	    {
-		$vars{sbatch_constraint} = "#SBATCH --constraint " . join("&", keys %constraint);
-	    }
+	    $vars{sbatch_constraint} = "#SBATCH --constraint $policy->{constraint}";
+	    # $constraint{$_} = 1 foreach $c =~ /\w+/g;
+	    # if (%constraint)
+	    # {
+	    # 	$vars{sbatch_constraint} = "#SBATCH --constraint " . join("&", keys %constraint);
+	    # }
 	}
     }
     
