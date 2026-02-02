@@ -21,6 +21,15 @@
 [% r %]
 [% END -%]
 
+if locale -a | grep -q "^${LANG}$"; then
+    echo "Locale $LANG exists and is valid." 1>&2
+else
+    echo "Locale $LANG does not exist or is invalid. Setting LANG to 'C'." 1>&2
+    export LANG=C
+fi
+
+
+
 [%# For a Singularity invocation, we will have variables 
     data_directory (location of data to be bound into /opt/patric-common-data) and
     container_image (location of image to run) 

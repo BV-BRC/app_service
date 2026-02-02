@@ -510,6 +510,70 @@ sub query_task_summary_async
 					  &$cb([$ret])});
 }
 
+=item B<query_task_summary_filtered>
+
+Return a summary of the counts of task statuses for the specified user,
+filtered by the given SimpleTaskFilter.
+
+If include_archived is true, includes both Task and ArchivedTask tables.
+The 'status' field in the filter is ignored since we want counts for ALL statuses.
+
+=cut
+
+sub query_task_summary_filtered
+{
+    my($self, $user_id, $simple_filter) = @_;
+
+    # Build filter conditions, but exclude status since we want counts per status
+    my ($cond, @param) = $self->_build_filter_conditions($user_id, $simple_filter, { exclude_status => 1 });
+
+    my $include_archived = $simple_filter->{include_archived} ? 1 : 0;
+
+    my $qry;
+    my @all_params;
+
+    if ($include_archived)
+    {
+	#
+	# Query both Task and ArchivedTask tables with UNION ALL
+	#
+	$qry = qq(
+	    SELECT service_status, SUM(cnt) as count FROM (
+		SELECT ts.service_status, COUNT(t.id) as cnt
+		FROM Task t JOIN TaskState ts ON t.state_code = ts.code
+		WHERE $cond
+		GROUP BY ts.service_status
+		UNION ALL
+		SELECT ts.service_status, COUNT(t.id) as cnt
+		FROM ArchivedTask t JOIN TaskState ts ON t.state_code = ts.code
+		WHERE $cond
+		GROUP BY ts.service_status
+	    ) combined
+	    GROUP BY service_status
+	);
+	@all_params = (@param, @param);
+    }
+    else
+    {
+	#
+	# Query only Task table (backward compatible behavior)
+	#
+	$qry = qq(
+	    SELECT ts.service_status, COUNT(t.id) as count
+	    FROM Task t JOIN TaskState ts ON t.state_code = ts.code
+	    WHERE $cond
+	    GROUP BY ts.service_status
+	);
+	@all_params = @param;
+    }
+
+    my $res = $self->dbh->selectall_arrayref($qry, undef, @all_params);
+
+    my $ret = {};
+    $ret->{$_->[0]} = int($_->[1]) foreach @$res;
+    return $ret;
+}
+
 =item B<query_app_summary>
 
 Return a summary of the counts of the apps for the specified user, asynchronous version.
@@ -542,7 +606,7 @@ sub query_app_summary_async
     
     my $async = $self->async;
     $async->selectall_arrayref(qq(SELECT count(id) as count, application_id
-				      FROM Task 
+				      FROM Task
 				      WHERE owner = ?
 				      GROUP BY application_id), undef, $user_id, sub {
 					  my($res) = @_;
@@ -550,6 +614,151 @@ sub query_app_summary_async
 					  my $ret = {};
 					  $ret->{$_->[1]} = int($_->[0]) foreach @$res;
 					  &$cb([$ret])});
+}
+
+=item B<_build_filter_conditions>
+
+Build WHERE clause conditions and parameters from a SimpleTaskFilter.
+
+Options:
+  exclude_app => 1      Skip the app filter (used by query_app_summary_filtered)
+  exclude_status => 1   Skip the status filter (used by query_task_summary_filtered)
+
+Returns ($where_clause, @params)
+
+=cut
+
+sub _build_filter_conditions
+{
+    my($self, $user_id, $simple_filter, $opts) = @_;
+
+    $opts //= {};
+
+    require DateTime::Format::MySQL;
+    require DateTime::Format::DateParse;
+
+    my @cond;
+    my @param;
+
+    push(@cond, "owner = ?");
+    push(@param, $user_id);
+
+    if (my $t = $simple_filter->{start_time})
+    {
+	my $dt = DateTime::Format::DateParse->parse_datetime($t);
+	if ($dt)
+	{
+	    push(@cond, "t.submit_time >= ?");
+	    push(@param, DateTime::Format::MySQL->format_datetime($dt));
+	}
+    }
+
+    if (my $t = $simple_filter->{end_time})
+    {
+	my $dt = DateTime::Format::DateParse->parse_datetime($t);
+	if ($dt)
+	{
+	    push(@cond, "t.submit_time <= ?");
+	    push(@param, DateTime::Format::MySQL->format_datetime($dt));
+	}
+    }
+
+    if (!$opts->{exclude_app})
+    {
+	if (my $app = $simple_filter->{app})
+	{
+	    if ($app =~ /^[0-9a-zA-Z_]+$/)
+	    {
+		push(@cond, "t.application_id = ?");
+		push(@param, $app);
+	    }
+	}
+    }
+
+    if (!$opts->{exclude_status})
+    {
+	if (my $st = $simple_filter->{status})
+	{
+	    if ($st =~ /^[-0-9a-zA-Z]+$/)
+	    {
+		push(@cond, "ts.service_status = ?");
+		push(@param, $st);
+	    }
+	}
+    }
+
+    if (my $search_text = $simple_filter->{search})
+    {
+	push(@cond, "MATCH t.search_terms AGAINST (?)");
+	push(@param, $search_text);
+    }
+
+    my $cond = join(" AND ", map { "($_)" } @cond);
+
+    return ($cond, @param);
+}
+
+=item B<query_app_summary_filtered>
+
+Return a summary of the counts of apps for the specified user,
+filtered by the given SimpleTaskFilter.
+
+If include_archived is true, includes both Task and ArchivedTask tables.
+The 'app' field in the filter is ignored since we want counts for ALL apps.
+
+=cut
+
+sub query_app_summary_filtered
+{
+    my($self, $user_id, $simple_filter) = @_;
+
+    my ($cond, @param) = $self->_build_filter_conditions($user_id, $simple_filter, { exclude_app => 1 });
+
+    my $include_archived = $simple_filter->{include_archived} ? 1 : 0;
+
+    my $qry;
+    my @all_params;
+
+    if ($include_archived)
+    {
+	#
+	# Query both Task and ArchivedTask tables with UNION ALL
+	#
+	$qry = qq(
+	    SELECT application_id, SUM(cnt) as count FROM (
+		SELECT t.application_id, COUNT(t.id) as cnt
+		FROM Task t JOIN TaskState ts ON t.state_code = ts.code
+		WHERE $cond
+		GROUP BY t.application_id
+		UNION ALL
+		SELECT t.application_id, COUNT(t.id) as cnt
+		FROM ArchivedTask t JOIN TaskState ts ON t.state_code = ts.code
+		WHERE $cond
+		GROUP BY t.application_id
+	    ) combined
+	    GROUP BY application_id
+	);
+	@all_params = (@param, @param);
+    }
+    else
+    {
+	#
+	# Query only Task table (backward compatible behavior)
+	#
+	$qry = qq(
+	    SELECT t.application_id, COUNT(t.id) as count
+	    FROM Task t JOIN TaskState ts ON t.state_code = ts.code
+	    WHERE $cond
+	    GROUP BY t.application_id
+	);
+	@all_params = @param;
+    }
+
+    my $res = $self->dbh->selectall_arrayref($qry, undef, @all_params);
+
+    my $ret = {};
+    $ret->{$_->[0]} = int($_->[1]) foreach @$res;
+    return $ret;
 }
 
 =item B<enumerate_tasks>
@@ -814,7 +1023,16 @@ sub enumerate_tasks_filtered_async
 
 Enumerate the task owned by the given user.
 
-The $simple_filter is a hash with keys start_time, end_time, app, search.
+The $simple_filter is a hash with keys start_time, end_time, app, search, status, include_archived,
+sort_field, and sort_order.
+
+If include_archived is true, queries both Task and ArchivedTask tables with
+pagination that spans across tables (active tasks first, then archived).
+
+Supported sort_field values: submit_time (default), start_time, finish_time,
+application_id, service_status, id, output_name.
+
+Supported sort_order values: desc (default), asc.
 
 =cut
 
@@ -822,99 +1040,168 @@ sub enumerate_tasks_filtered
 {
     my($self, $user_id, $offset, $count, $simple_filter, $cb) = @_;
 
-    my @cond;
-    my @param;
+    my ($cond, @param) = $self->_build_filter_conditions($user_id, $simple_filter);
 
-    require DateTime::Format::MySQL;
-    require DateTime::Format::DateParse;
+    my $include_archived = $simple_filter->{include_archived} ? 1 : 0;
 
-    push(@cond, "owner = ?");
-    push(@param, $user_id);
+    #
+    # Build ORDER BY clause from sort_field and sort_order
+    #
+    my %valid_sort_fields = (
+	submit_time    => 't.submit_time',
+	start_time     => 't.start_time',
+	finish_time    => 't.finish_time',
+	application_id => 't.application_id',
+	service_status => 'ts.service_status',
+	id             => 't.id',
+	output_file    => 't.output_file',
+    );
 
-    if (my $t = $simple_filter->{start_time})
-    {
-	my $dt = DateTime::Format::DateParse->parse_datetime($t);
-	if ($dt)
-	{
-	    push(@cond, "t.submit_time >= ?");
-	    push(@param, DateTime::Format::MySQL->format_datetime($dt));
-	}
-    }
+    my $sort_field = $simple_filter->{sort_field} // 'submit_time';
+    my $sort_order = lc($simple_filter->{sort_order} // 'desc');
 
-    if (my $t = $simple_filter->{end_time})
-    {
-	my $dt = DateTime::Format::DateParse->parse_datetime($t);
-	if ($dt)
-	{
-	    push(@cond, "t.submit_time <= ?");
-	    push(@param, DateTime::Format::MySQL->format_datetime($dt));
-	}
-    }
+    # Validate sort_field - fall back to submit_time if invalid
+    my $order_col = $valid_sort_fields{$sort_field} // 't.submit_time';
 
-    if (my $app = $simple_filter->{app})
-    {
-	if ($app =~ /^[0-aA-Za-z]+$/)
-	{
-	    push(@cond, "t.application_id = ?");
-	    push(@param, $app);
-	}
-    }
+    # Validate sort_order - fall back to DESC if invalid
+    $sort_order = 'desc' unless $sort_order eq 'asc';
 
-    if (my $st = $simple_filter->{status})
-    {
-	if ($st =~ /^[-0-aA-Za-z]+$/)
-	{
-	    push(@cond, "ts.service_status = ?");
-	    push(@param, $st);
-	}
-
-    }
-    if (my $search_text = $simple_filter->{search})
-    {
-	push(@cond, "MATCH t.search_terms AGAINST (?)");
-	push(@param, $search_text);
-    }
-    
-    my $cond = join(" AND ", map { "($_)" } @cond);
+    my $order_clause = "ORDER BY $order_col " . uc($sort_order);
 
     my $ret_fields = "t.id, t.parent_task, t.application_id, t.params, t.owner, ";
     for my $x (qw(submit_time start_time finish_time))
     {
 	$ret_fields .= "IF($x = default($x), '', DATE_FORMAT( CONVERT_TZ(`$x`, \@\@session.time_zone, '+00:00') ,'%Y-%m-%dT%TZ')) as $x, ";
-	# $ret_fields .= "DATE_FORMAT( CONVERT_TZ(`$x`, \@\@session.time_zone, '+00:00') ,'%Y-%m-%dT%TZ') as $x, ";
     }
     $ret_fields .= "if(t.finish_time != default(t.finish_time) and t.start_time != default(t.start_time), timediff(t.finish_time, t.start_time), '') as elapsed_time, ";
     $ret_fields .= " ts.service_status";
 
-    my $qry = qq(SELECT $ret_fields
-		 FROM Task t JOIN TaskState ts on t.state_code = ts.code
-		 WHERE $cond
-		 ORDER BY t.submit_time DESC
-		 LIMIT ?
-		 OFFSET ?);
-    my $count_qry = qq(SELECT COUNT(t.id)
-		       FROM Task t JOIN TaskState ts on t.state_code = ts.code
-		       WHERE $cond);
-
     my $dbh = $self->dbh;
 
-    my $sth = $dbh->prepare($qry);
-    $sth->execute(@param, $count, $offset);
-
-    my $tasks = [];
-    while (my $task = $sth->fetchrow_hashref())
+    if (!$include_archived)
     {
-	push(@$tasks, $self->format_task_for_service($task));
+	#
+	# Original behavior: query only Task table
+	#
+	my $qry = qq(SELECT $ret_fields
+		     FROM Task t JOIN TaskState ts on t.state_code = ts.code
+		     WHERE $cond
+		     $order_clause
+		     LIMIT ?
+		     OFFSET ?);
+	my $count_qry = qq(SELECT COUNT(t.id)
+			   FROM Task t JOIN TaskState ts on t.state_code = ts.code
+			   WHERE $cond);
+
+	my $sth = $dbh->prepare($qry);
+	$sth->execute(@param, $count, $offset);
+
+	my $tasks = [];
+	while (my $task = $sth->fetchrow_hashref())
+	{
+	    push(@$tasks, $self->format_task_for_service($task));
+	}
+
+	$sth = $dbh->prepare($count_qry);
+	$sth->execute(@param);
+
+	my $row = $sth->fetchrow_arrayref();
+	my $total = int($row->[0]);
+
+	return ($tasks, $total);
     }
 
-    $sth = $dbh->prepare($count_qry);
-    $sth->execute(@param);
+    #
+    # Include archived tasks: pagination spans Task -> ArchivedTask
+    #
 
-    my $row = $sth->fetchrow_arrayref();
-    print Dumper($row);
-    my $count = int($row->[0]);
+    # Count active (Task) tasks matching filter
+    my $active_count_qry = qq(SELECT COUNT(t.id)
+			      FROM Task t JOIN TaskState ts ON t.state_code = ts.code
+			      WHERE $cond);
+    my $active_count = $dbh->selectcol_arrayref($active_count_qry, undef, @param)->[0] // 0;
 
-    return ($tasks, $count);
+    # Count archived tasks matching filter
+    my $archive_count_qry = qq(SELECT COUNT(t.id)
+			       FROM ArchivedTask t JOIN TaskState ts ON t.state_code = ts.code
+			       WHERE $cond);
+    my $archive_total = $dbh->selectcol_arrayref($archive_count_qry, undef, @param)->[0] // 0;
+
+    my $total_tasks = $active_count + $archive_total;
+
+    #
+    # Determine which tables to query based on offset/count
+    #
+    my $rec_start = $offset;
+    my $rec_end = $offset + $count - 1;
+
+    my $need_active = 0;
+    my $need_archive = 0;
+    my $active_offset = 0;
+    my $active_limit = 0;
+    my $archive_offset = 0;
+    my $archive_limit = 0;
+
+    if ($offset >= $active_count)
+    {
+	# Entirely in archive
+	$need_archive = 1;
+	$archive_offset = $offset - $active_count;
+	$archive_limit = $count;
+    }
+    elsif ($rec_end >= $active_count)
+    {
+	# Spans both tables
+	$need_active = 1;
+	$need_archive = 1;
+	$active_offset = $offset;
+	$active_limit = $active_count - $offset;
+	$archive_offset = 0;
+	$archive_limit = $count - $active_limit;
+    }
+    else
+    {
+	# Entirely in active
+	$need_active = 1;
+	$active_offset = $offset;
+	$active_limit = $count;
+    }
+
+    my $tasks = [];
+
+    if ($need_active)
+    {
+	my $active_qry = qq(SELECT $ret_fields
+			    FROM Task t JOIN TaskState ts ON t.state_code = ts.code
+			    WHERE $cond
+			    $order_clause
+			    LIMIT ?
+			    OFFSET ?);
+	my $sth = $dbh->prepare($active_qry);
+	$sth->execute(@param, $active_limit, $active_offset);
+	while (my $task = $sth->fetchrow_hashref())
+	{
+	    push(@$tasks, $self->format_task_for_service($task));
+	}
+    }
+
+    if ($need_archive)
+    {
+	my $archive_qry = qq(SELECT $ret_fields
+			     FROM ArchivedTask t JOIN TaskState ts ON t.state_code = ts.code
+			     WHERE $cond
+			     $order_clause
+			     LIMIT ?
+			     OFFSET ?);
+	my $sth = $dbh->prepare($archive_qry);
+	$sth->execute(@param, $archive_limit, $archive_offset);
+	while (my $task = $sth->fetchrow_hashref())
+	{
+	    push(@$tasks, $self->format_task_for_service($task));
+	}
+    }
+
+    return ($tasks, $total_tasks);
 }
 
 sub format_task_for_service

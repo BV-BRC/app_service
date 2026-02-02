@@ -107,9 +107,18 @@ module AppService
 	app_id app;
 	string search;
 	string status;
+	int include_archived;
+	string sort_field;
+	string sort_order;
     } SimpleTaskFilter;
     funcdef enumerate_tasks_filtered(int offset, int count, SimpleTaskFilter simple_filter)
 	returns (list<Task> tasks, int total_tasks);
+
+    funcdef query_task_summary_filtered(SimpleTaskFilter simple_filter)
+	returns (mapping<task_status status, int count> status);
+
+    funcdef query_app_summary_filtered(SimpleTaskFilter simple_filter)
+	returns (mapping<app_id app, int count> status);
 
     funcdef kill_task(task_id id) returns (int killed, string msg);
     funcdef kill_tasks(list<task_id> ids) returns (mapping<task_id, structure { int killed; string msg; }>);

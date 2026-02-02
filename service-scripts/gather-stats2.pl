@@ -59,7 +59,9 @@ for (my $i = 0; $i < @$apps; $i++)
 }
 
 my $field = $opt->by_user ? 'user_count' : 'job_count';
-my $tbl = $opt->by_user ? 'BySiteStatsGatherUser' : 'BySiteStatsGather';
+my $tbl = $opt->by_user ? 'BySiteStatsGatherUser' : 'AllSitesStatsGather';
+
+goto x;
 
 my $res = $db->dbh->selectall_arrayref(qq(SELECT month, year, application_id, site, $field FROM $tbl));
 
@@ -79,7 +81,7 @@ for my $ent (@$res)
 	    
 for my $site ('PATRIC', 'BV-BRC')
 {
-    print "Per-site data for $site\n";
+    print $out_fh "Per-site data for $site\n";
     print $out_fh join("\t", "", @$apps), "\n";
 	
     for my $key (@order)
@@ -89,6 +91,33 @@ for my $site ('PATRIC', 'BV-BRC')
 	print $out_fh join("\t", $key, @$dat), "\n";
     }
     print "\n\n";
+}
+x:
+
+#
+# Total data
+
+my $res = $db->dbh->selectall_arrayref(qq(SELECT month, year, application_id, $field FROM $tbl));
+
+my %matrix;
+my %seen;
+my @order;
+for my $ent (@$res)
+{
+    my($month, $year, $app, $count) = @$ent;
+    my $key = "$month/1/$year";
+    push(@order, $key) unless $seen{$key}++;
+    $matrix{$key}->[$app_index{$app}] = $count;
+}
+
+print $out_fh "Overall data\n";
+print $out_fh join("\t", "", @$apps), "\n";
+
+for my $key (@order)
+{
+    my $dat = $matrix{$key};
+    next unless $dat;
+    print $out_fh join("\t", $key, @$dat), "\n";
 }
 
 
