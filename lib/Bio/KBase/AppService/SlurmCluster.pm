@@ -1025,6 +1025,11 @@ sub queue_check
 	my($id, $isbatch) = $vals{JobID}  =~ /(\d+)(\.batch)?/;
 	# print STDERR "$id: " . Dumper(\%vals);
 
+	#
+	# Ignore the .extern stage as that will always be marrked as complete.
+	#
+	next if $vals{JobId} =~ /\.extern/;
+
 	if ($isbatch)
 	{
 	    $jobinfo{$id} = { %vals };
