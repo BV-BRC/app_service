@@ -1028,7 +1028,7 @@ sub queue_check
 	#
 	# Ignore the .extern stage as that will always be marrked as complete.
 	#
-	next if $vals{JobId} =~ /\.extern/;
+	next if $vals{JobID} =~ /\.extern/;
 
 	if ($isbatch)
 	{
