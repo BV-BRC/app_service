@@ -43,7 +43,7 @@ download_compute_image () {
 	(
 	    flock --exclusive 200 
 	    if [ ! -f "$output_path" ]; then   # do a second check once the lock has been released 
-		curl --retry 5 --fail -o $output_tmp -L $url
+		curl --retry 5 --retry-all-errors --continue-at - --fail -o $output_tmp -L $url
 		ret=$?
 		if [ $ret -ne 0 ] ; then
     		    echo "Curl of $url to $output_tmp failed with $ret" 1>&2
