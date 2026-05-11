@@ -191,30 +191,62 @@ sub run_preflight
 	# Check for app override of container
 	#
 	my $task_container = $db->determine_container_id_override($task_params, $start_params);
-	
+
+	#
+	# Look up site_type from SiteDefaultContainer using base_url
+	#
+	my $site_type;
+	my $site_default_container;
+	if (my $base_url = $start_params->{base_url})
+	{
+	    my $site_default = $db->schema->resultset("SiteDefaultContainer")->find($base_url);
+	    if ($site_default)
+	    {
+		$site_type = $site_default->site_type;
+		$site_default_container = $site_default->default_container_id;
+	    }
+	}
+
 	if (!$task_container)
 	{
 	    #
-	    # Check for container defined for this application type
+	    # Check for container defined for this application type + site_type
 	    #
+	    if ($site_type)
+	    {
+		my $app_site_default = $db->schema->resultset('ApplicationDefaultContainer')
+		    ->find({ application_id => $app_id, site_type => $site_type });
+		if ($app_site_default)
+		{
+		    $task_container = $app_site_default->default_container_id;
+		    print STDERR "Using app+site_type container $task_container for $app_id / $site_type\n";
+		}
+	    }
+	}
 
-	    my $app_default = $db->schema->resultset('ApplicationDefaultContainer')->find($app_id);
+	if (!$task_container)
+	{
+	    #
+	    # Check for global container default for this application (site_type='')
+	    #
+	    my $app_default = $db->schema->resultset('ApplicationDefaultContainer')
+		->find({ application_id => $app_id, site_type => '' });
 	    if ($app_default)
 	    {
 		$task_container = $app_default->default_container_id;
+		print STDERR "Using global app container $task_container for $app_id\n";
 	    }
 	}
+
 	if (!$task_container)
 	{
-	    # Check for container defined for base url
-	    if (my $base_url = $start_params->{base_url})
+	    #
+	    # Fall back to site default container
+	    #
+	    if ($site_default_container)
 	    {
-		my $site_default = $db->schema->resultset("SiteDefaultContainer")->find($base_url);
-		if ($site_default)
-		{
-		    $task_container = $site_default->default_container_id;
-		    print STDERR "found container $task_container for $base_url\n";
-		}
+		$task_container = $site_default_container;
+		print STDERR "Using site default container $task_container\n";
 	    }
 	}
 	
