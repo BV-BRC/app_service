@@ -1364,8 +1364,25 @@ sub reset_job
 	    $res = $self->dbh->do($qry, undef,  @params, $job);
 	}
 	print STDERR "Update returns $res\n";
+
+	if ($reset_params->{storage})
+	{
+	    my $row = $self->dbh->selectrow_arrayref(qq(SELECT params FROM Task WHERE id = ?), undef, $job);
+	    if ($row && $row->[0])
+	    {
+		my $params = eval { $self->json->decode($row->[0]) };
+		if (ref($params) eq 'HASH')
+		{
+		    $params->{_preflight} //= {};
+		    $params->{_preflight}->{storage} = $reset_params->{storage} + 0;
+		    my $new_params = $self->json->encode($params);
+		    $self->dbh->do(qq(UPDATE Task SET params = ? WHERE id = ?), undef, $new_params, $job);
+		    print STDERR "Updated storage to $reset_params->{storage} for job $job\n";
+		}
+	    }
+	}
     }
-							    
+
 }
 
 1;
