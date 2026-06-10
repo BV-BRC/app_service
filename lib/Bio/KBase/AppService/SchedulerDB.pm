@@ -167,12 +167,12 @@ sub create_task
     my $policy_data = {};
 
     #
-    # Policy data. We merge keys from policy-related start parameters
-    # and anything in the preflight policy data.
+    # Policy data. Apply preflight defaults first, then let start parameters
+    # override (so --constraint and --reservation from appserv-start-app win).
     #
 
-    $policy_data->{$_} = $start_parameters->{$_} foreach grep { exists $start_parameters->{$_} } qw(reservation constraint);
     $policy_data->{$_} = $preflight->{policy_data}->{$_} foreach keys %{$preflight->{policy_data}};
+    $policy_data->{$_} = $start_parameters->{$_} foreach grep { exists $start_parameters->{$_} } qw(reservation constraint);
     
     my $container_id = $self->determine_container_id_override($task_parameters, $start_parameters);
     my $data_container_id = $self->determine_data_container_id_override($task_parameters, $start_parameters);
