@@ -41,6 +41,13 @@ __PACKAGE__->table("ApplicationDefaultContainer");
   is_nullable: 0
   size: 255
 
+=head2 site_type
+
+  data_type: 'varchar'
+  is_nullable: 0
+  default_value: ''
+  size: 255
+
 =head2 default_container_id
 
   data_type: 'varchar'
@@ -53,6 +60,8 @@ __PACKAGE__->table("ApplicationDefaultContainer");
 __PACKAGE__->add_columns(
   "application_id",
   { data_type => "varchar", is_nullable => 0, size => 255 },
+  "site_type",
+  { data_type => "varchar", is_nullable => 0, default_value => '', size => 255 },
   "default_container_id",
   { data_type => "varchar", is_foreign_key => 1, is_nullable => 1, size => 2155 },
 );
@@ -63,11 +72,13 @@ __PACKAGE__->add_columns(
 
 =item * L</application_id>
 
+=item * L</site_type>
+
 =back
 
 =cut
 
-__PACKAGE__->set_primary_key("application_id");
+__PACKAGE__->set_primary_key("application_id", "site_type");
 
 =head1 RELATIONS
 

@@ -24,6 +24,7 @@ my($opt, $usage) = describe_options("%c %o",
 				    ["time|t=s" => "Reset the requested duration"],
 				    ["memory|m=s" => "Reset the requested memory"],
 				    ["cpu|c=s" => "Reset the requested number of cpus"],
+				    ["storage|s=s" => "Reset the requested storage (bytes)"],
 				    ["data-container|D=s" => "Reset the requested data container"],
 				    ["container|C=s" => "Reset the requested runtime container"],
 				    ["help|h" => "Show this help message."],
@@ -44,6 +45,25 @@ elsif ($opt->time)
 {
     $time = eval { parse_duration($opt->time); };
     die "Cannot parse '" . $opt->time . "'" unless defined($time);
+}
+
+my $storage;
+if ($opt->storage)
+{
+    my $s = $opt->storage;
+    if ($s =~ /^(\d+(?:\.\d+)?)\s*([TGMK])B?$/i)
+    {
+	my %mult = (T => 1e12, G => 1e9, M => 1e6, K => 1e3);
+	$storage = int($1 * $mult{uc $2});
+    }
+    elsif ($s =~ /^\d+$/)
+    {
+	$storage = $s + 0;
+    }
+    else
+    {
+	die "Cannot parse storage '$s' (use e.g. 50G, 1.5T, 500M, or bytes)\n";
+    }
 }
 
 my $db = Bio::KBase::AppService::SchedulerDB->new();
@@ -68,6 +88,7 @@ for my $task (@task_ids)
        ($time ? (time => $time) : ()),
        ($opt->memory ? (memory => $opt->memory) : ()),
        ($opt->cpu ? (cpu => $opt->cpu) : ()),
+       ($storage ? (storage => $storage) : ()),
        ($opt->data_container ? (data_container_id => $opt->data_container) : ()),
        ($opt->container ? (container_id => $opt->container) : ()),
    });

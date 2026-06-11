@@ -529,13 +529,14 @@ sub build_submission_for_tasks
     #
     # P3_CONTAINER hard override
     # Container setting from the Task being scheduled
-    # Container setting from the ApplicationDefaultContainer for the Task's application
+    # Container setting from the ApplicationDefaultContainer for the Task's application + site_type
+    # Container setting from the ApplicationDefaultContainer for the Task's application (global)
     # Container setting from the SiteDefaultContainer for the site the Task was submitted from
     # Cluster default container
     #
 
     local $Data::Dumper::Maxdepth = 1;
-    
+
     if ($ENV{P3_CONTAINER})
     {
 	$vars{container_image} = $ENV{P3_CONTAINER};
@@ -551,31 +552,60 @@ sub build_submission_for_tasks
 
 	my $container = $task->container;
 
+	#
+	# Look up site_type from SiteDefaultContainer using base_url
+	#
+	my $site_type;
+	my $site_default_container;
+	if ($base_url)
+	{
+	    my $site_default = $self->schema->resultset("SiteDefaultContainer")->find($base_url);
+	    if ($site_default)
+	    {
+		$site_type = $site_default->site_type;
+		$site_default_container = $site_default->default_container;
+	    }
+	}
+
 	if (!$container)
 	{
 	    #
-	    # Query the application default container table for a app-default container.
+	    # Query the application default container table for an app + site_type specific container.
 	    #
-	    my $app_default = $self->schema->resultset('ApplicationDefaultContainer')->find($task->application_id);
+	    if ($site_type)
+	    {
+		my $app_site_default = $self->schema->resultset('ApplicationDefaultContainer')
+		    ->find({ application_id => $task->application_id, site_type => $site_type });
+		if ($app_site_default)
+		{
+		    $container = $app_site_default->default_container;
+		    print STDERR "Choosing container " . $container->id . " for " . $task->id .
+			" due to default container for app " . $task->application_id . " + site_type $site_type\n";
+		}
+	    }
+	}
+
+	if (!$container)
+	{
+	    #
+	    # Query the application default container table for a global app-default container (site_type='').
+	    #
+	    my $app_default = $self->schema->resultset('ApplicationDefaultContainer')
+		->find({ application_id => $task->application_id, site_type => '' });
 	    if ($app_default)
 	    {
 		$container = $app_default->default_container;
-		print STDERR "Choosing container " . $container->id . " for " . $task->id . " due to default container for app " . $task->application_id . "\n";
+		print STDERR "Choosing container " . $container->id . " for " . $task->id .
+		    " due to global default container for app " . $task->application_id . "\n";
 	    }
 	}
+
 	if (!$container)
 	{
 	    #
-	    # If we have a base url set, determine if we have a container defined for it.
+	    # Fall back to site default container
 	    #
-	    if ($base_url)
-	    {
-		my $site_default = $self->schema->resultset("SiteDefaultContainer")->find($base_url);
-		if ($site_default)
-		{
-		    $container = $site_default->default_container;
-		}
-	    }
+	    $container = $site_default_container;
 	}
 	$container //= $cinfo->default_container;
 	if ($container)
