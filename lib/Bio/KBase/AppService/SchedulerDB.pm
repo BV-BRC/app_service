@@ -1204,6 +1204,233 @@ sub enumerate_tasks_filtered
     return ($tasks, $total_tasks);
 }
 
+=item B<_build_qstat_conditions>
+
+    my($where, @params) = $self->_build_qstat_conditions($scope, $filter);
+
+Build the WHERE clause and bind parameters for the qstat access pattern.
+
+$scope controls owner visibility and is set by the service implementation (the
+trust boundary), never by the client:
+
+  restrict_owner => $user   Force "t.owner = $user" (per-user isolation). When
+                            undef, no owner restriction is applied (admin, or the
+                            masked whole-queue view).
+
+$filter is a QStatFilter hash. Table aliases: t=Task, te=TaskExecution,
+cj=ClusterJob, ts=TaskState.
+
+=cut
+
+sub _normalize_owner
+{
+    my($self, $u) = @_;
+    return $u unless defined $u && length $u;
+    $u .= '@patricbrc.org' if $u !~ /@/;
+    return $u;
+}
+
+sub _build_qstat_conditions
+{
+    my($self, $scope, $filter) = @_;
+
+    require DateTime::Format::MySQL;
+    require DateTime::Format::DateParse;
+
+    my @cond = ('1=1');
+    my @param;
+
+    #
+    # Owner isolation. Only applied when the caller's scope demands it.
+    #
+    if (defined(my $owner = $scope->{restrict_owner}) && length($scope->{restrict_owner} // ''))
+    {
+	push(@cond, "t.owner = ?");
+	push(@param, $self->_normalize_owner($owner));
+    }
+
+    my $parse_dt = sub {
+	my($v) = @_;
+	my $dt = eval { DateTime::Format::DateParse->parse_datetime($v) };
+	return $dt ? DateTime::Format::MySQL->format_datetime($dt) : undef;
+    };
+
+    if (my $t = $filter->{start_time})
+    {
+	if (my $d = $parse_dt->($t)) { push(@cond, "t.submit_time >= ?"); push(@param, $d); }
+    }
+    if (my $t = $filter->{end_time})
+    {
+	if (my $d = $parse_dt->($t)) { push(@cond, "t.submit_time < ?"); push(@param, $d); }
+    }
+    if (my $t = $filter->{started_after})
+    {
+	if (my $d = $parse_dt->($t)) { push(@cond, "t.start_time >= ?"); push(@param, $d); }
+    }
+
+    if (my $app = $filter->{app})
+    {
+	if ($app =~ /^[0-9a-zA-Z_]+$/)
+	{
+	    push(@cond, "t.application_id = ?");
+	    push(@param, $app);
+	}
+    }
+
+    if (defined(my $st = $filter->{status}) && length $filter->{status})
+    {
+	my @codes = grep { /^[-0-9a-zA-Z]+$/ } split(/,/, $st);
+	if (@codes)
+	{
+	    push(@cond, "t.state_code IN (" . join(",", ("?") x @codes) . ")");
+	    push(@param, @codes);
+	}
+    }
+
+    if (defined(my $cl = $filter->{cluster}) && length $filter->{cluster})
+    {
+	push(@cond, "cj.cluster_id = ?");
+	push(@param, $cl);
+    }
+
+    if (my $nodes = $filter->{compute_nodes})
+    {
+	if (ref($nodes) eq 'ARRAY' && @$nodes)
+	{
+	    push(@cond, "cj.nodelist IN (" . join(",", ("?") x @$nodes) . ")");
+	    push(@param, @$nodes);
+	}
+    }
+
+    if (defined(my $um = $filter->{user_metadata}) && length $filter->{user_metadata})
+    {
+	push(@cond, "t.user_metadata = ?");
+	push(@param, $um);
+    }
+
+    if (!$filter->{include_inactive})
+    {
+	push(@cond, "(te.active = 1 OR te.active IS NULL)");
+    }
+
+    my $cond = join(" AND ", map { "($_)" } @cond);
+    return ($cond, @param);
+}
+
+=item B<enumerate_tasks_qstat>
+
+    my($tasks, $total) = $self->enumerate_tasks_qstat($scope, $offset, $count, $filter);
+
+Return queue records in the p3x-qstat style: Task joined to its (active) cluster
+execution, with cluster-level fields. Owner visibility is governed by $scope
+(see _build_qstat_conditions); masking of foreign rows is done by the caller
+(the service implementation). Returns the list of task hashes and the total count
+of matching tasks (ignoring offset/count).
+
+=cut
+
+sub enumerate_tasks_qstat
+{
+    my($self, $scope, $offset, $count, $filter) = @_;
+
+    $offset = 0 unless defined $offset && $offset =~ /^\d+$/;
+    $count  = 0 unless defined $count  && $count  =~ /^\d+$/;
+
+    my ($cond, @param) = $self->_build_qstat_conditions($scope, $filter);
+
+    my %valid_sort_fields = (
+	submit_time    => 't.submit_time',
+	start_time     => 't.start_time',
+	finish_time    => 't.finish_time',
+	application_id => 't.application_id',
+	status         => 'ts.service_status',
+	id             => 't.id',
+	maxrss         => 'cj.maxrss',
+    );
+    my $order_col = $valid_sort_fields{$filter->{sort_field} // ''} // 't.submit_time';
+    my $sort_order = lc($filter->{sort_order} // 'desc') eq 'asc' ? 'ASC' : 'DESC';
+    my $order_clause = "ORDER BY $order_col $sort_order";
+
+    my $joins = qq(FROM Task t
+		   LEFT OUTER JOIN TaskExecution te ON te.task_id = t.id
+		   LEFT OUTER JOIN ClusterJob cj ON cj.id = te.cluster_job_id
+		   JOIN TaskState ts ON t.state_code = ts.code
+		   WHERE $cond);
+
+    my $dbh = $self->dbh;
+
+    #
+    # Total count (independent of offset/count). DISTINCT guards against a task
+    # with more than one matching execution row.
+    #
+    my $count_row = $dbh->selectcol_arrayref(qq(SELECT COUNT(DISTINCT t.id) $joins), undef, @param);
+    my $total = int($count_row->[0] // 0);
+
+    my $tasks = [];
+    if ($count > 0)
+    {
+	my $want_params = $filter->{include_parameters} ? 1 : 0;
+
+	my $fields = qq(t.id, t.owner, t.application_id,
+			ts.description as state_desc,
+			IF(t.submit_time = default(t.submit_time), '', DATE_FORMAT(CONVERT_TZ(t.submit_time, \@\@session.time_zone, '+00:00'), '%Y-%m-%dT%TZ')) as submit_time,
+			IF(t.start_time = default(t.start_time), '', DATE_FORMAT(CONVERT_TZ(t.start_time, \@\@session.time_zone, '+00:00'), '%Y-%m-%dT%TZ')) as start_time,
+			IF(t.finish_time = default(t.finish_time), '', DATE_FORMAT(CONVERT_TZ(t.finish_time, \@\@session.time_zone, '+00:00'), '%Y-%m-%dT%TZ')) as finish_time,
+			IF(t.finish_time != default(t.finish_time) AND t.start_time != default(t.start_time), timediff(t.finish_time, t.start_time), '') as elapsed_time,
+			t.output_path, t.output_file, t.user_metadata,
+			t.req_cpu, t.req_memory, t.req_runtime,
+			cj.cluster_id, cj.job_id as cluster_job_id, cj.job_status as cluster_job_status,
+			cj.nodelist, cj.maxrss);
+	$fields .= ", t.params" if $want_params;
+
+	my $qry = qq(SELECT $fields $joins $order_clause LIMIT ? OFFSET ?);
+	my $sth = $dbh->prepare($qry);
+	$sth->execute(@param, $count, $offset);
+
+	while (my $r = $sth->fetchrow_hashref())
+	{
+	    push(@$tasks, $self->format_qstat_task($r, $want_params));
+	}
+    }
+
+    return ($tasks, $total);
+}
+
+sub format_qstat_task
+{
+    my($self, $r, $want_params) = @_;
+
+    my $params = {};
+    if ($want_params && defined $r->{params})
+    {
+	$params = eval { decode_json($r->{params}) } // {};
+    }
+
+    return {
+	id                 => "" . ($r->{id} // ''),
+	owner              => $r->{owner} // '',
+	app                => $r->{application_id} // '',
+	masked             => 0,
+	status             => $r->{state_desc} // '',
+	submit_time        => $r->{submit_time} // '',
+	start_time         => $r->{start_time} // '',
+	finish_time        => $r->{finish_time} // '',
+	elapsed_time       => "" . ($r->{elapsed_time} // ''),
+	output_path        => $r->{output_path} // '',
+	output_file        => $r->{output_file} // '',
+	user_metadata      => $r->{user_metadata} // '',
+	req_cpu            => int($r->{req_cpu} // 0),
+	req_memory         => $r->{req_memory} // '',
+	req_runtime        => int($r->{req_runtime} // 0),
+	cluster_id         => $r->{cluster_id} // '',
+	cluster_job_id     => "" . ($r->{cluster_job_id} // ''),
+	cluster_job_status => $r->{cluster_job_status} // '',
+	nodelist           => $r->{nodelist} // '',
+	maxrss             => ($r->{maxrss} // 0) + 0,
+	parameters         => $params,
+    };
+}
+
 sub format_task_for_service
 {
     my($self, $task) = @_;

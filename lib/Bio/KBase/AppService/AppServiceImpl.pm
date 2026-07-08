@@ -1495,6 +1495,221 @@ sub query_app_summary_filtered
 }
 
 
+=head2 enumerate_tasks_qstat
+
+  $tasks, $total_tasks = $obj->enumerate_tasks_qstat($offset, $count, $filter)
+
+=over 4
+
+
+=item Parameter and return types
+
+=begin html
+
+<pre>
+$offset is an int
+$count is an int
+$filter is a QStatFilter
+$tasks is a reference to a list where each element is a QStatTask
+$total_tasks is an int
+QStatFilter is a reference to a hash where the following keys are defined:
+	start_time has a value which is a string
+	end_time has a value which is a string
+	started_after has a value which is a string
+	app has a value which is an app_id
+	status has a value which is a string
+	cluster has a value which is a string
+	compute_nodes has a value which is a reference to a list where each element is a string
+	user_metadata has a value which is a string
+	include_archived has a value which is an int
+	include_inactive has a value which is an int
+	include_parameters has a value which is an int
+	sort_field has a value which is a string
+	sort_order has a value which is a string
+	owner has a value which is a string
+	all_users has a value which is an int
+app_id is a string
+QStatTask is a reference to a hash where the following keys are defined:
+	id has a value which is a task_id
+	owner has a value which is a string
+	app has a value which is an app_id
+	masked has a value which is an int
+	status has a value which is a task_status
+	submit_time has a value which is a string
+	start_time has a value which is a string
+	finish_time has a value which is a string
+	elapsed_time has a value which is a string
+	output_path has a value which is a string
+	output_file has a value which is a string
+	user_metadata has a value which is a string
+	req_cpu has a value which is an int
+	req_memory has a value which is a string
+	req_runtime has a value which is an int
+	cluster_id has a value which is a string
+	cluster_job_id has a value which is a string
+	cluster_job_status has a value which is a string
+	nodelist has a value which is a string
+	maxrss has a value which is a float
+	parameters has a value which is a task_parameters
+task_id is a string
+task_status is a string
+task_parameters is a reference to a hash where the key is a string and the value is a string
+</pre>
+
+=end html
+
+=begin text
+
+$offset is an int
+$count is an int
+$filter is a QStatFilter
+$tasks is a reference to a list where each element is a QStatTask
+$total_tasks is an int
+QStatFilter is a reference to a hash where the following keys are defined:
+	start_time has a value which is a string
+	end_time has a value which is a string
+	started_after has a value which is a string
+	app has a value which is an app_id
+	status has a value which is a string
+	cluster has a value which is a string
+	compute_nodes has a value which is a reference to a list where each element is a string
+	user_metadata has a value which is a string
+	include_archived has a value which is an int
+	include_inactive has a value which is an int
+	include_parameters has a value which is an int
+	sort_field has a value which is a string
+	sort_order has a value which is a string
+	owner has a value which is a string
+	all_users has a value which is an int
+app_id is a string
+QStatTask is a reference to a hash where the following keys are defined:
+	id has a value which is a task_id
+	owner has a value which is a string
+	app has a value which is an app_id
+	masked has a value which is an int
+	status has a value which is a task_status
+	submit_time has a value which is a string
+	start_time has a value which is a string
+	finish_time has a value which is a string
+	elapsed_time has a value which is a string
+	output_path has a value which is a string
+	output_file has a value which is a string
+	user_metadata has a value which is a string
+	req_cpu has a value which is an int
+	req_memory has a value which is a string
+	req_runtime has a value which is an int
+	cluster_id has a value which is a string
+	cluster_job_id has a value which is a string
+	cluster_job_status has a value which is a string
+	nodelist has a value which is a string
+	maxrss has a value which is a float
+	parameters has a value which is a task_parameters
+task_id is a string
+task_status is a string
+task_parameters is a reference to a hash where the key is a string and the value is a string
+
+=end text
+
+
+
+=item Description
+
+
+=back
+
+=cut
+
+sub enumerate_tasks_qstat
+{
+    my $self = shift;
+    my($offset, $count, $filter) = @_;
+
+    my @_bad_arguments;
+    (!ref($offset)) or push(@_bad_arguments, "Invalid type for argument \"offset\" (value was \"$offset\")");
+    (!ref($count)) or push(@_bad_arguments, "Invalid type for argument \"count\" (value was \"$count\")");
+    (ref($filter) eq 'HASH') or push(@_bad_arguments, "Invalid type for argument \"filter\" (value was \"$filter\")");
+    if (@_bad_arguments) {
+	my $msg = "Invalid arguments passed to enumerate_tasks_qstat:\n" . join("", map { "\t$_\n" } @_bad_arguments);
+	die $msg;
+    }
+
+    my $ctx = $Bio::KBase::AppService::Service::CallContext;
+    my($tasks, $total_tasks);
+    #BEGIN enumerate_tasks_qstat
+
+    #
+    # Visibility enforcement lives here (the trust boundary), never in the
+    # client. Determine whether the caller is an administrator via the
+    # role-based token check, then build a scope the DB layer must honor.
+    #
+    my $user_id = $ctx->user_id;
+    my $is_admin = 0;
+    eval {
+	$is_admin = P3AuthToken->new(token => $ctx->token, ignore_authrc => 1)->is_admin ? 1 : 0;
+    };
+
+    my $all_users = $filter->{all_users} ? 1 : 0;
+
+    my $scope;
+    my $mask_for;
+    if ($is_admin)
+    {
+	#
+	# Admins see everything unmasked and may restrict to a single owner.
+	#
+	$scope = { restrict_owner => $filter->{owner} };
+    }
+    elsif ($all_users)
+    {
+	#
+	# Non-admin whole-queue view: the DB returns all rows, but rows the
+	# caller does not own are masked below. A non-admin may not target a
+	# specific owner.
+	#
+	$scope = { restrict_owner => undef };
+	$mask_for = $user_id;
+    }
+    else
+    {
+	#
+	# Default: the caller may see only their own jobs. This is forced as a
+	# WHERE clause in the DB layer, so a crafted call cannot see foreign rows.
+	#
+	$scope = { restrict_owner => $user_id };
+    }
+
+    ($tasks, $total_tasks) = $self->{scheduler_db}->enumerate_tasks_qstat($scope, $offset, $count, $filter);
+
+    #
+    # Mask identifying fields on rows the caller does not own. State, timing,
+    # cluster, node and RAM remain visible; id, owner and application are
+    # redacted and parameters are dropped.
+    #
+    if (defined($mask_for))
+    {
+	for my $t (@$tasks)
+	{
+	    next if lc($t->{owner} // '') eq lc($mask_for);
+	    $t->{id} = '';
+	    $t->{owner} = '';
+	    $t->{app} = '';
+	    $t->{masked} = 1;
+	    delete $t->{parameters};
+	}
+    }
+
+    #END enumerate_tasks_qstat
+    my @_bad_returns;
+    (ref($tasks) eq 'ARRAY') or push(@_bad_returns, "Invalid type for return variable \"tasks\" (value was \"$tasks\")");
+    (!ref($total_tasks)) or push(@_bad_returns, "Invalid type for return variable \"total_tasks\" (value was \"$total_tasks\")");
+    if (@_bad_returns) {
+	my $msg = "Invalid returns passed to enumerate_tasks_qstat:\n" . join("", map { "\t$_\n" } @_bad_returns);
+	die $msg;
+    }
+    return($tasks, $total_tasks);
+}
+
+
 =head2 kill_task
 
   $killed, $msg = $obj->kill_task($id)
@@ -2220,6 +2435,140 @@ status has a value which is a string
 include_archived has a value which is an int
 sort_field has a value which is a string
 sort_order has a value which is a string
+
+
+=end text
+
+=back
+
+
+
+=head2 QStatFilter
+
+=over 4
+
+
+=item Description
+
+request whole queue (non-owned rows masked for non-admins)
+
+=item Definition
+
+=begin html
+
+<pre>
+a reference to a hash where the following keys are defined:
+start_time has a value which is a string
+end_time has a value which is a string
+started_after has a value which is a string
+app has a value which is an app_id
+status has a value which is a string
+cluster has a value which is a string
+compute_nodes has a value which is a reference to a list where each element is a string
+user_metadata has a value which is a string
+include_archived has a value which is an int
+include_inactive has a value which is an int
+include_parameters has a value which is an int
+sort_field has a value which is a string
+sort_order has a value which is a string
+owner has a value which is a string
+all_users has a value which is an int
+
+</pre>
+
+=end html
+
+=begin text
+
+a reference to a hash where the following keys are defined:
+start_time has a value which is a string
+end_time has a value which is a string
+started_after has a value which is a string
+app has a value which is an app_id
+status has a value which is a string
+cluster has a value which is a string
+compute_nodes has a value which is a reference to a list where each element is a string
+user_metadata has a value which is a string
+include_archived has a value which is an int
+include_inactive has a value which is an int
+include_parameters has a value which is an int
+sort_field has a value which is a string
+sort_order has a value which is a string
+owner has a value which is a string
+all_users has a value which is an int
+
+
+=end text
+
+=back
+
+
+
+=head2 QStatTask
+
+=over 4
+
+
+=item Description
+
+cluster (e.g. Slurm) job id
+
+=item Definition
+
+=begin html
+
+<pre>
+a reference to a hash where the following keys are defined:
+id has a value which is a task_id
+owner has a value which is a string
+app has a value which is an app_id
+masked has a value which is an int
+status has a value which is a task_status
+submit_time has a value which is a string
+start_time has a value which is a string
+finish_time has a value which is a string
+elapsed_time has a value which is a string
+output_path has a value which is a string
+output_file has a value which is a string
+user_metadata has a value which is a string
+req_cpu has a value which is an int
+req_memory has a value which is a string
+req_runtime has a value which is an int
+cluster_id has a value which is a string
+cluster_job_id has a value which is a string
+cluster_job_status has a value which is a string
+nodelist has a value which is a string
+maxrss has a value which is a float
+parameters has a value which is a task_parameters
+
+</pre>
+
+=end html
+
+=begin text
+
+a reference to a hash where the following keys are defined:
+id has a value which is a task_id
+owner has a value which is a string
+app has a value which is an app_id
+masked has a value which is an int
+status has a value which is a task_status
+submit_time has a value which is a string
+start_time has a value which is a string
+finish_time has a value which is a string
+elapsed_time has a value which is a string
+output_path has a value which is a string
+output_file has a value which is a string
+user_metadata has a value which is a string
+req_cpu has a value which is an int
+req_memory has a value which is a string
+req_runtime has a value which is an int
+cluster_id has a value which is a string
+cluster_job_id has a value which is a string
+cluster_job_status has a value which is a string
+nodelist has a value which is a string
+maxrss has a value which is a float
+parameters has a value which is a task_parameters
 
 
 =end text
