@@ -17,6 +17,7 @@ use Data::Dumper;
 use JSON::XS;
 use Bio::KBase::AppService::SchedulerDB;
 use Time::Duration::Parse;
+use IPC::Run qw(run);
 
 use Getopt::Long::Descriptive;
 
@@ -84,6 +85,8 @@ foreach (@ARGV)
 
 for my $task (@task_ids)
 {
+    remove_output_folder($task);
+
     $db->reset_job($task, {
        ($time ? (time => $time) : ()),
        ($opt->memory ? (memory => $opt->memory) : ()),
@@ -92,4 +95,44 @@ for my $task (@task_ids)
        ($opt->data_container ? (data_container_id => $opt->data_container) : ()),
        ($opt->container ? (container_id => $opt->container) : ()),
    });
+}
+
+sub remove_output_folder
+{
+    my($task) = @_;
+
+    my @qstat_cmd = ('p3x-qstat', '--show-output-file', '--show-output-path', '--parsable', '--no-header', $task);
+    my $qstat_out;
+    my $ok = run(\@qstat_cmd, '>', \$qstat_out, '2>', \my $qstat_err);
+    if (!$ok)
+    {
+	warn "Error running @qstat_cmd: $qstat_err\n";
+	return;
+    }
+
+    my($line) = split(/\n/, $qstat_out);
+    if (!$line)
+    {
+	warn "No qstat output found for job $task; not removing output folder\n";
+	return;
+    }
+
+    my @fields = split(/\t/, $line);
+    my $output_file = $fields[-2];
+    my $output_path = $fields[-1];
+    if (!$output_file || !$output_path)
+    {
+	warn "Could not determine output path for job $task; not removing output folder\n";
+	return;
+    }
+
+    my $folder = "$output_path/.$output_file";
+
+    my @rm_cmd = ('p3-rm', '-A', '-r', $folder);
+    my $rm_err;
+    $ok = run(\@rm_cmd, '2>', \$rm_err);
+    if (!$ok)
+    {
+	warn "Error removing output folder $folder for job $task: $rm_err\n";
+    }
 }
