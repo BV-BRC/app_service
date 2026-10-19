@@ -3,6 +3,7 @@ package Bio::KBase::AppService::Scheduler;
 use 5.010;
 use strict;
 use P3AuthToken;
+use P3ClientUA;
 use Bio::KBase::AppService::SchedulerDB;
 use Bio::KBase::AppService::AppConfig qw(sched_db_host sched_db_user sched_db_pass sched_db_port sched_db_name
 					 redis_host redis_port redis_db redis_password);
@@ -480,7 +481,7 @@ sub find_user
 	my $user_info = {};
 	if ($access_token && $proj->id eq 'PATRIC')
 	{
-	    my $ua = LWP::UserAgent->new;
+	    my $ua = P3ClientUA::new_ua();
 	    my $url = "https://user.patricbrc.org/user/$base";
 	    my $res = $ua->get($url,
 			       Accept => "application/json",

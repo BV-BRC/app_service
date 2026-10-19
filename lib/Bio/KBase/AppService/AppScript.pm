@@ -17,11 +17,36 @@ use P3AuthToken;
 use Getopt::Long::Descriptive;
 use Time::HiRes 'gettimeofday';
 use LWP::UserAgent;
+use P3ClientUA;
 use REST::Client;
 use Bio::KBase::AppService::AppConfig ':all';
 use Clone qw(clone);
 
 use base 'Class::Accessor';
+
+#
+# Identify app code to the BV-BRC services.
+#
+# Every App-*.pl in the tree loads this module -- all 47 of them, across 33
+# repositories -- so this is the one seam that covers the lot. p3_cli has to
+# do the equivalent in its Makefile precisely because it has no such module;
+# here we do, so the identity travels with the code rather than with the
+# wrapper, and an app script run directly still announces itself.
+#
+# set_product deliberately outranks an inherited P3_CLIENT_PRODUCT: an app
+# launched by a p3-* tool would otherwise claim to be bvbrc-cli-perl.
+#
+# No version: stamping a release is a release-tooling job, and code that
+# guesses a version is worse than code that reports none.
+#
+# Guarded, because this runs at module load in all 47 app scripts and
+# app_service and p3_auth deploy independently. An undefined set_product
+# would not degrade the agent, it would kill every app at startup -- which
+# is how p3_core spent three weeks calling an undefined retry_request. When
+# p3_auth is too old the agent falls back to "BV-BRC P3 Client", which is
+# still off the Cloudflare block list.
+#
+P3ClientUA->can('set_product') and P3ClientUA::set_product("bvbrc-app-perl");
 
 use Data::Dumper;
 
@@ -319,8 +344,13 @@ sub run
 	return;
     }
 
-    my $ua = LWP::UserAgent->new();
-    my $rest = REST::Client->new();
+    #
+    # REST::Client builds its own LWP::UserAgent when it is not handed one,
+    # so the $ua built here used to be discarded and the job-logging calls
+    # went out as libwww-perl. Pass it in, as Shock.pm already does.
+    #
+    my $ua = P3ClientUA::new_ua();
+    my $rest = REST::Client->new(useragent => $ua);
     $rest->setHost("$appserv_url/" . $self->task_id);
     $rest->addHeader("Authorization", "OAuth " . $self->token()->token());
     print STDERR "Logging to " . "$appserv_url/" . $self->task_id . "\n";

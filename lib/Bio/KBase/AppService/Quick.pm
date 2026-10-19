@@ -9,6 +9,7 @@ use strict;
 use Data::Dumper;
 use POSIX;
 use LWP::UserAgent;
+use P3ClientUA;
 use HTTP::Headers;
 use JSON::XS qw//;
 use MIME::Base64;
@@ -90,7 +91,7 @@ hook before => sub {
 	
 	if (!$token)
 	{
-	    my $ua = LWP::UserAgent->new;
+	    my $ua = P3ClientUA::new_ua();
 	    
 	    if ($user =~ /^([^@]+)\@patricbrc.org$/)
 	    {
@@ -261,7 +262,7 @@ get '/:id/retrieve' => sub {
 	if ($meta->shock_url)
 	{
 	    # print "GET " . $meta->shock_url . "\n";
-	    my $ua = LWP::UserAgent->new;
+	    my $ua = P3ClientUA::new_ua();
 	    my $wres = $ua->get($meta->shock_url . "?download",
 				Authorization => "OAuth " . $token);
 	    $out = $wres->content;
