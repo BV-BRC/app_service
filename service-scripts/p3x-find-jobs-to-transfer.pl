@@ -14,6 +14,7 @@ use P3DataAPI;
 use File::Slurp;
 use File::Path qw(make_path);
 use LWP::UserAgent;
+use P3ClientUA;
 use JSON::XS;
 use Config::Simple;
 use MongoDB;
@@ -83,7 +84,7 @@ $adj_start_dt->subtract(days => 1 );
 print "Starting from $start_dt adj $adj_start_dt\n";
 
 my $api = P3DataAPI->new;
-my $ua = LWP::UserAgent->new;
+my $ua = P3ClientUA::new_ua();
 my $ws = Bio::P3::Workspace::WorkspaceClientExt->new;
 
 my $cfg = Config::Simple->new;

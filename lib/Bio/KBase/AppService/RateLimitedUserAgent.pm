@@ -6,12 +6,13 @@ use Data::Dumper;
 use strict;
 use base 'LWP::UserAgent';
 use URI;
+use P3ClientUA;
 
 sub new
 {
     my($class, $limit, @rest) = @_;
 
-    my $self = LWP::UserAgent->new(@rest);
+    my $self = P3ClientUA::new_ua(@rest);
 
     $self->{_limit} = $limit;
     $self->{_history} = {};

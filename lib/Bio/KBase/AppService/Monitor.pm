@@ -4,6 +4,7 @@ use Dancer2;
 use strict;
 use Data::Dumper;
 use LWP::UserAgent;
+use P3ClientUA;
 use HTTP::Headers;
 use JSON::XS qw//;
 use File::Spec;
@@ -97,7 +98,7 @@ get '/logout' => sub {
 };
 
 post '/login' => sub {
-    my $ua = LWP::UserAgent->new;
+    my $ua = P3ClientUA::new_ua();
     my $headers = HTTP::Headers->new;
     my %headers;
     $headers->authorization_basic(param('user'), param('password'));

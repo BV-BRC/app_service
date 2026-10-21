@@ -11,6 +11,7 @@ use IO::Handle;
 use Fcntl qw(:flock SEEK_END SEEK_SET);
 use Data::Dumper;
 use LWP::UserAgent;
+use P3ClientUA;
 use JSON::XS;
 use File::Slurp;
 
@@ -29,7 +30,7 @@ my $transfer_dir = shift;
 -d $transfer_dir or die "Transfer directory $transfer_dir does not exist\n";
 my $solr_url = "http://balsam.cels.anl.gov:15183";
 
-my $ua = LWP::UserAgent->new;
+my $ua = P3ClientUA::new_ua();
 my @cores = qw(genome genome_sequence genome_feature feature_sequence pathway subsystem sp_gene genome_amr);
 
 open(LOG, "+>>", "$transfer_dir/completed") or die "Cannot open $transfer_dir/completed: $!";

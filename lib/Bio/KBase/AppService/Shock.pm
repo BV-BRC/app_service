@@ -3,6 +3,7 @@ package Bio::KBase::AppService::Shock;
 use strict;
 use REST::Client;
 use LWP::UserAgent;
+use P3ClientUA;
 use JSON::XS;
 use Data::Dumper;
 use HTTP::Request::Common;
@@ -15,7 +16,7 @@ sub new
 {
     my($class, $server, $auth_token) = @_;
 
-    my $ua = LWP::UserAgent->new();
+    my $ua = P3ClientUA::new_ua();
     my $rest = REST::Client->new(useragent => $ua);
     my @auth_header;
     if ($auth_token)

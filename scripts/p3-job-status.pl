@@ -16,11 +16,12 @@ use Try::Tiny;
 use IO::Handle;
 use Data::Dumper;
 use LWP::UserAgent;
+use P3ClientUA;
 
 use JSON::XS;
 
 my $json = JSON::XS->new->pretty(1);
-my $ua = LWP::UserAgent->new();
+my $ua = P3ClientUA::new_ua();
 my $token = P3AuthToken->new();
 if (!$token->token())
 {
